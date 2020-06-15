@@ -32,6 +32,10 @@ RAW_URL = [
     "avatars0.githubusercontent.com"]
 IPADDRESS_PREFIX = ".ipaddress.com"
 
+HOSTS_TEMPLATE = """# GitHub520 Host Start
+{content}# Star me GitHub url: https://github.com/521xueweihan/GitHub520
+# GitHub520 Host End\n"""
+
 
 def write_file(hosts_content: str):
     update_time = datetime.utcnow().astimezone(
@@ -46,7 +50,7 @@ def write_file(hosts_content: str):
         old_hosts = old_content.split("```bash")[1].split("```")[0].strip()
     if old_hosts == hosts_content:
         print("host not change")
-        return
+        return False
 
     with open(template_path, "r") as temp_fb:
         template_str = temp_fb.read()
@@ -54,11 +58,14 @@ def write_file(hosts_content: str):
                                             update_time=update_time)
         with open(output_doc_file_path, "w") as output_fb:
             output_fb.write(hosts_content)
+    return True
+
 
 def write_yaml_file(hosts_content: str):
     output_yaml_file_path = os.path.join(os.path.dirname(__file__), 'hosts')
     with open(output_yaml_file_path, "w") as output_yaml_fb:
         output_yaml_fb.write(hosts_content)
+
 
 def make_ipaddress_url(raw_url: str):
     """
@@ -92,21 +99,51 @@ def get_ip(session: requests.session, raw_url: str):
         raise Exception
 
 
+@retry(tries=3)
+def update_gitee_gist(session: requests.session, host_content):
+    gitee_token = os.getenv("gitee_token")
+    gitee_gist_id = os.getenv("gitee_gist_id")
+    gist_file_name = os.getenv("gitee_gist_file_name")
+    url = "https://gitee.com/api/v5/gists/{}".format(gitee_gist_id)
+    headers = {
+        "Content-Type": "application/json",
+        "charset": "UTF-8"}
+    data = {
+        "access_token": gitee_token,
+        "files": {gist_file_name: {"content": host_content}},
+        "public": "true"}
+    try:
+        response = session.patch(url, data=data, headers=headers, timeout=20)
+        if response.status_code == 200:
+            print("update gitee gist success")
+        else:
+            print("update gitee gist fail: {} {}".format(response.status_code,
+                                                         response.content))
+    except Exception:
+        raise Exception
+
+
 def main():
-    hosts_template = """# GitHub520 Host Start\n{content}# GitHub520 Host End"""
     session = requests.session()
     content = ""
     for raw_url in RAW_URL:
         try:
             host_name, ip = get_ip(session, raw_url)
-            content += ip.ljust(50) + host_name + "\n"
+            content += ip.ljust(30) + host_name + "\n"
         except Exception:
             continue
 
-    if content:
-        hosts_content = hosts_template.format(content=content)
-        print(hosts_content)
-        write_file(hosts_content)
+    if not content:
+        return
+
+    hosts_content = HOSTS_TEMPLATE.format(content=content)
+    has_change = write_file(hosts_content)
+    # if has_change:
+    try:
+        update_gitee_gist(session, hosts_content)
+    except Exception as e:
+        print("update gitee gist fail:{}".format(e))
+    print(hosts_content)
 
 
 if __name__ == '__main__':
